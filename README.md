@@ -58,7 +58,7 @@ The configuration JSON file contains the runtime environment variables and follo
 `num` outputs a minified JSON which can be pretty printed with a tool like `jq`.
 ## Screenshots
 
-![App Screenshot](https://via.placeholder.com/468x300?text=App+Screenshot+Here)
+![App Screenshot](res/demo.gif)
 
 
 ## Contributing
