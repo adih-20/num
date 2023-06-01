@@ -37,7 +37,7 @@ The resulting binary (`num`) will be found in `./target/debug` or `./target/rele
 To learn how to use `num`, invoke `num` with the `-h` or `--help` argument.
 
 CSV files created by `num` follow the following format:
-```
+```csv
 Timestamp,Latency(ms)
 2023-05-31 17:10:38.662942381 -05:00:00,51
 2023-05-31 17:10:43.630355854 -05:00:00,42
