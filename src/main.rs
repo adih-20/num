@@ -84,6 +84,7 @@ async fn main() {
         );
         std::process::exit(1);
     }
+    let canonicalized_output_path = output_path.canonicalize().unwrap();
 
     // Need to check as otherwise timer will de-sync
     if timeout >= delay * 1000 {
@@ -111,7 +112,10 @@ async fn main() {
         .await;
         let dt_fmt = format_description::parse(DT_FMT).unwrap();
         stdout.execute(cursor::Hide).unwrap();
-
+        let target_text = generate_target_text(&addr);
+        let path_text = generate_path_text(&canonicalized_output_path);
+        let delay_timeout_text = generate_delay_timeout_text(delay, timeout);
+        let bytes_ttl_text = generate_bytes_ttl_text(ttl, num_bytes);
         loop {
             // wait for timer
             interval.tick().await;
@@ -127,15 +131,13 @@ async fn main() {
                 .unwrap();
             display_tui(
                 &stdout,
-                &addr,
-                &output_path,
-                delay,
-                timeout,
-                ttl,
-                num_bytes,
                 &last_successful_text,
                 &last_failed_text,
                 &last_ping_text,
+                &target_text,
+                &path_text,
+                &delay_timeout_text,
+                &bytes_ttl_text,
             );
             stdout.flush().unwrap();
             stdout.execute(cursor::MoveUp(10)).unwrap();
@@ -144,9 +146,10 @@ async fn main() {
     // Below is invoked upon the user pressing Ctrl+C
     signal::ctrl_c().await.expect("event listener failure");
     // Move cursor down to prevent overwriting old TUI
-    stdout().execute(cursor::MoveDown(10)).unwrap();
+    let mut exit_stdout = stdout();
+    exit_stdout.execute(cursor::MoveDown(10)).unwrap();
     println!("{}", "\nExiting".blue().bold());
-    stdout().execute(cursor::Show).unwrap();
+    exit_stdout.execute(cursor::Show).unwrap();
     app_task.abort();
 }
 
@@ -202,54 +205,60 @@ fn generate_ping_text(
     }
 }
 
+/// Generate stylized text representing the target of the ping calls
+fn generate_target_text(addr: &String) -> String {
+    format!("{}Target:{} {addr}\n", Attribute::Bold, Attribute::Reset)
+}
+
+/// Generate stylized text representing the output path of the logs/config files
+fn generate_path_text(output_path: &Path) -> String {
+    format!(
+        "{}Output path:{} {}\n",
+        Attribute::Bold,
+        Attribute::Reset,
+        output_path.display()
+    )
+}
+
+/// Generate stylized text representing the delay and timeout of the current run  
+fn generate_delay_timeout_text(delay: u64, timeout: u64) -> String {
+    format!(
+        "{}Delay:{} {delay}s, {}Timeout:{} {timeout}ms\n",
+        Attribute::Bold,
+        Attribute::Reset,
+        Attribute::Bold,
+        Attribute::Reset
+    )
+}
+
+/// Generate stylized text representing the number of bytes and ttl of the current run
+fn generate_bytes_ttl_text(ttl: u8, num_bytes: u8) -> String {
+    format!(
+        "{}Num. Bytes:{} {num_bytes}, {}TTL:{} {ttl}\n",
+        Attribute::Bold,
+        Attribute::Reset,
+        Attribute::Bold,
+        Attribute::Reset
+    )
+}
+
 /// Display a simple TUI (Terminal User Interface) to the user with basic statistics of the app
 /// state.
 #[allow(clippy::too_many_arguments)] // This method helps code readability in main
 fn display_tui(
     mut stdout: &Stdout,
-    addr: &String,
-    output_path: &Path,
-    delay: u64,
-    timeout: u64,
-    ttl: u8,
-    num_bytes: u8,
     last_successful_text: &StyledContent<String>,
     last_failed_text: &StyledContent<String>,
     last_ping_text: &StyledContent<String>,
+    target_text: &String,
+    path_text: &String,
+    delay_timeout_text: &String,
+    bytes_ttl_text: &String,
 ) {
-    writeln!(
-        stdout,
-        "{}Target:{} {addr}",
-        Attribute::Bold,
-        Attribute::Reset
-    )
-    .unwrap();
-    writeln!(
-        stdout,
-        "{}Output path:{} {}",
-        Attribute::Bold,
-        Attribute::Reset,
-        output_path.canonicalize().unwrap().display()
-    )
-    .unwrap();
-    writeln!(
-        stdout,
-        "{}Delay:{} {delay}s, {}Timeout:{} {timeout}ms",
-        Attribute::Bold,
-        Attribute::Reset,
-        Attribute::Bold,
-        Attribute::Reset
-    )
-    .unwrap();
-    writeln!(
-        stdout,
-        "{}Num. Bytes:{} {num_bytes}, {}TTL:{} {ttl}",
-        Attribute::Bold,
-        Attribute::Reset,
-        Attribute::Bold,
-        Attribute::Reset
-    )
-    .unwrap();
+    stdout.write_all(target_text.as_ref()).unwrap();
+    stdout.write_all(path_text.as_ref()).unwrap();
+    stdout.write_all(delay_timeout_text.as_ref()).unwrap();
+    stdout.write_all(bytes_ttl_text.as_ref()).unwrap();
     writeln!(
         stdout,
         "\n{}Last successful ping:{} {last_successful_text}",

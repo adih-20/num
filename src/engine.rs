@@ -35,6 +35,7 @@ pub struct Engine {
     last_successful_time: Option<OffsetDateTime>,
     last_failed_time: Option<OffsetDateTime>,
     output_path: PathBuf,
+    result_file_handle: Option<File>,
 }
 
 impl Engine {
@@ -50,7 +51,7 @@ impl Engine {
         unsafe {
             time::util::local_offset::set_soundness(time::util::local_offset::Soundness::Unsound)
         }
-        let result_engine = Engine {
+        let mut result_engine = Engine {
             ip_addr: Engine::process_ip(addr),
             data: vec![0; num_bytes.into()],
             timeout: Duration::from_millis(timeout),
@@ -63,12 +64,13 @@ impl Engine {
             last_successful_latency: None,
             last_failed_time: None,
             last_successful_time: None,
+            result_file_handle: None,
         };
         unsafe {
             time::util::local_offset::set_soundness(time::util::local_offset::Soundness::Sound)
         }
         result_engine.create_config(delay).await;
-        result_engine.init_csv().await;
+        result_engine.result_file_handle = Some(result_engine.init_csv().await);
         result_engine
     }
 
@@ -146,14 +148,14 @@ impl Engine {
     }
 
     /// Creates a CSV file for the app logs with a header.
-    async fn init_csv(&self) {
+    async fn init_csv(&self) -> File {
+        let csv_path = self
+            .output_path
+            .join(format!("result<{}>.csv", self.start_time));
         let mut new_csv = OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(
-                self.output_path
-                    .join(format!("result<{}>.csv", self.start_time)),
-            )
+            .open(&csv_path)
             .await
             .expect("Error creating CSV");
         new_csv
@@ -161,27 +163,31 @@ impl Engine {
             .await
             .expect("Error writing header to CSV");
         new_csv.flush().await.unwrap();
+        OpenOptions::new()
+            .append(true)
+            .open(&csv_path)
+            .await
+            .unwrap()
     }
 
     /// Appends log data to a pre-created CSV.
-    async fn write_csv(&self, timestamp: OffsetDateTime, result: &PingApiOutput) {
-        let mut result_csv = OpenOptions::new()
-            .append(true)
-            .open(
-                self.output_path
-                    .join(format!("result<{}>.csv", self.start_time)),
-            )
-            .await
-            .expect("Error creating CSV");
+    async fn write_csv(&mut self, timestamp: OffsetDateTime, result: &PingApiOutput) {
         let rtt: String = match result {
             Ok(v) => v.rtt.to_string(),
             Err(_) => "failed".to_string(),
         };
-        result_csv
+        self.result_file_handle
+            .as_mut()
+            .unwrap()
             .write_all(format!("{},{}\n", timestamp, rtt).as_ref())
             .await
             .expect("Failed to write to CSV");
-        result_csv.flush().await.unwrap();
+        self.result_file_handle
+            .as_mut()
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
     }
 
     pub fn get_last_successful_latency(&self) -> u32 {
