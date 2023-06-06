@@ -21,7 +21,8 @@ use std::net::{IpAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use time::OffsetDateTime;
+use time::format_description::OwnedFormatItem;
+use time::{format_description, OffsetDateTime};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 
@@ -35,6 +36,7 @@ pub struct Engine {
     last_successful_time: Option<OffsetDateTime>,
     last_failed_time: Option<OffsetDateTime>,
     output_path: PathBuf,
+    file_date_fmt: OwnedFormatItem,
     result_file_handle: Option<File>,
 }
 
@@ -64,6 +66,10 @@ impl Engine {
             last_successful_latency: None,
             last_failed_time: None,
             last_successful_time: None,
+            file_date_fmt: format_description::parse_owned::<1>(
+                "[month]-[day]-[year]@[hour]-[minute]-[second]",
+            )
+            .unwrap(),
             result_file_handle: None,
         };
         unsafe {
@@ -134,10 +140,10 @@ impl Engine {
             self.options.ttl,
             delay
         );
-        let mut config_file = File::create(
-            self.output_path
-                .join(format!("config<{}>.json", self.start_time)),
-        )
+        let mut config_file = File::create(self.output_path.join(format!(
+            "config_{}.json",
+            self.start_time.format(&self.file_date_fmt).unwrap()
+        )))
         .await
         .expect("Error creating config file");
         config_file
@@ -149,9 +155,10 @@ impl Engine {
 
     /// Creates a CSV file for the app logs with a header.
     async fn init_csv(&self) -> File {
-        let csv_path = self
-            .output_path
-            .join(format!("result<{}>.csv", self.start_time));
+        let csv_path = self.output_path.join(format!(
+            "result_{}.csv",
+            self.start_time.format(&self.file_date_fmt).unwrap()
+        ));
         let mut new_csv = OpenOptions::new()
             .create_new(true)
             .write(true)
