@@ -7,7 +7,7 @@ edition = "2021"
 clap = "4.3.2"
 crossterm = { default-features = false, version = "0.26.1" }
 ping-rs = "0.1.2"
-time = { version = "0.3.21", features = ["formatting", "local-offset"], default-features = false }
+time = { version = "0.3.22", features = ["formatting", "local-offset"], default-features = false }
 tokio = { version = "1.28.2", features = ["macros", "signal", "fs", "io-util", "time", "rt-multi-thread", "net"], default-features = false }
 
 [profile.release]
