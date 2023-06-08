@@ -17,7 +17,7 @@
  */
 
 use ping_rs::{PingApiOutput, PingOptions};
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,6 +25,7 @@ use time::format_description::OwnedFormatItem;
 use time::{format_description, OffsetDateTime};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
+use tokio::net;
 
 pub struct Engine {
     ip_addr: IpAddr,
@@ -54,7 +55,7 @@ impl Engine {
             time::util::local_offset::set_soundness(time::util::local_offset::Soundness::Unsound)
         }
         let mut result_engine = Engine {
-            ip_addr: Engine::process_ip(addr),
+            ip_addr: Engine::process_ip(addr).await,
             data: vec![0; num_bytes.into()],
             timeout: Duration::from_millis(timeout),
             options: PingOptions {
@@ -111,24 +112,26 @@ impl Engine {
 
     /// Convert a String representation of an IP address or hostname (with/without port number)
     /// to an IpAddr. Panics if invalid address/port number is passed in.
-    fn process_ip(addr: String) -> IpAddr {
-        addr.parse::<IpAddr>().unwrap_or_else(|_| {
-            if addr.contains(':') {
-                addr.to_socket_addrs()
+    async fn process_ip(addr: String) -> IpAddr {
+        let possible_addr = addr.parse::<IpAddr>();
+        if possible_addr.is_err() {
+            return if addr.contains(':') {
+                net::lookup_host(addr)
+                    .await
                     .expect("Address/Port unreachable")
                     .next()
                     .unwrap()
                     .ip()
             } else {
-                [addr, ":80".to_string()]
-                    .concat()
-                    .to_socket_addrs()
+                net::lookup_host([addr, ":80".to_string()].concat())
+                    .await
                     .expect("Address/Port unreachable")
                     .next()
                     .unwrap()
                     .ip()
-            }
-        })
+            };
+        }
+        possible_addr.unwrap()
     }
 
     /// Creates a JSON file reflecting current application configuration in a user-configurable directory.
