@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = "4.3.2"
+clap = "4.3.17"
 crossterm = { default-features = false, version = "0.26.1" }
 ping-rs = "0.1.2"
 time = { version = "0.3.22", features = ["formatting", "local-offset"], default-features = false }
