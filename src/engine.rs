@@ -16,11 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use ping_rs::{PingApiOutput, PingOptions};
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
+use surge_ping::{
+    Client, Config, IcmpPacket, PingIdentifier, PingSequence, Pinger, SurgeError, ICMP,
+};
 use time::format_description::OwnedFormatItem;
 use time::{format_description, OffsetDateTime};
 use tokio::fs::{File, OpenOptions};
@@ -29,11 +30,12 @@ use tokio::net;
 
 pub struct Engine {
     ip_addr: IpAddr,
+    ttl: u32,
     data: Vec<u8>,
     timeout: Duration,
-    options: PingOptions,
+    ping_handler: Pinger,
     start_time: OffsetDateTime,
-    last_successful_latency: Option<u32>,
+    last_successful_latency: Option<Duration>,
     last_successful_time: Option<OffsetDateTime>,
     last_failed_time: Option<OffsetDateTime>,
     output_path: PathBuf,
@@ -45,7 +47,7 @@ impl Engine {
     /// Create a new Engine struct and initialize config and result files.
     pub async fn new(
         addr: String,
-        ttl_i: u8,
+        ttl_i: u32,
         timeout: u64,
         num_bytes: u8,
         delay: u64,
@@ -54,14 +56,20 @@ impl Engine {
         unsafe {
             time::util::local_offset::set_soundness(time::util::local_offset::Soundness::Unsound)
         }
+        let ip_addr = Engine::process_ip(addr).await;
+        let config = match ip_addr {
+            IpAddr::V4(_) => Config::builder().kind(ICMP::V4).ttl(ttl_i).build(),
+            IpAddr::V6(_) => Config::builder().kind(ICMP::V6).ttl(ttl_i).build(),
+        };
+        let client = Client::new(&config).unwrap();
+        let mut pinger = client.pinger(ip_addr, PingIdentifier(1)).await;
+        pinger.timeout(Duration::from_millis(timeout));
         let mut result_engine = Engine {
-            ip_addr: Engine::process_ip(addr).await,
+            ip_addr,
             data: vec![0; num_bytes.into()],
             timeout: Duration::from_millis(timeout),
-            options: PingOptions {
-                ttl: ttl_i,
-                dont_fragment: false,
-            },
+            ping_handler: pinger,
+            ttl: ttl_i,
             start_time: OffsetDateTime::now_local().expect("TZ data not found for this system"),
             output_path: path,
             last_successful_latency: None,
@@ -78,11 +86,12 @@ impl Engine {
         }
         result_engine.create_config(delay).await;
         result_engine.result_file_handle = Some(result_engine.init_csv().await);
+        std::mem::forget(client); // Client's socket needs to survive to ping, so it cannot be dropped
         result_engine
     }
 
     /// Transmit a ping and log relevant information. Returns sent time and ping information.
-    pub async fn ping(&mut self) -> (OffsetDateTime, PingApiOutput) {
+    pub async fn ping(&mut self) -> (OffsetDateTime, Result<(IcmpPacket, Duration), SurgeError>) {
         unsafe {
             time::util::local_offset::set_soundness(time::util::local_offset::Soundness::Unsound)
         }
@@ -91,18 +100,10 @@ impl Engine {
         unsafe {
             time::util::local_offset::set_soundness(time::util::local_offset::Soundness::Sound)
         }
-
-        let output = ping_rs::send_ping_async(
-            &self.ip_addr,
-            self.timeout,
-            Arc::new(&self.data),
-            Some(&self.options),
-        )
-        .await;
-
+        let output = self.ping_handler.ping(PingSequence(0), &self.data).await;
         self.write_csv(curr_time, &output).await;
-        if let Ok(output) = &output {
-            self.last_successful_latency = Some(output.rtt);
+        if let Ok((_, rtt)) = &output {
+            self.last_successful_latency = Some(*rtt);
             self.last_successful_time = Some(curr_time);
         } else {
             self.last_failed_time = Some(curr_time);
@@ -140,7 +141,7 @@ impl Engine {
             self.ip_addr,
             self.data.len(),
             self.timeout.as_millis(),
-            self.options.ttl,
+            self.ttl,
             delay
         );
         let mut config_file = File::create(self.output_path.join(format!(
@@ -181,9 +182,13 @@ impl Engine {
     }
 
     /// Appends log data to a pre-created CSV.
-    async fn write_csv(&mut self, timestamp: OffsetDateTime, result: &PingApiOutput) {
+    async fn write_csv(
+        &mut self,
+        timestamp: OffsetDateTime,
+        result: &Result<(IcmpPacket, Duration), SurgeError>,
+    ) {
         let rtt: String = match result {
-            Ok(v) => v.rtt.to_string(),
+            Ok((_, rtt)) => rtt.as_millis().to_string(),
             Err(_) => "failed".to_string(),
         };
         self.result_file_handle
@@ -200,7 +205,7 @@ impl Engine {
             .unwrap();
     }
 
-    pub fn get_last_successful_latency(&self) -> u32 {
+    pub fn get_last_successful_latency(&self) -> Duration {
         self.last_successful_latency.unwrap()
     }
 
@@ -210,5 +215,10 @@ impl Engine {
 
     pub fn get_possible_last_failed_time(&self) -> Option<OffsetDateTime> {
         self.last_failed_time
+    }
+
+    /// Return the internal IpAddr used for pinging.
+    pub fn get_processed_ip(&self) -> IpAddr {
+        self.ip_addr
     }
 }

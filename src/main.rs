@@ -20,10 +20,11 @@ use crate::engine::Engine;
 use clap::{arg, value_parser, Command};
 use crossterm::style::{Attribute, StyledContent, Stylize};
 use crossterm::{cursor, terminal, ExecutableCommand};
-use ping_rs::PingApiOutput;
 use std::io::{stdout, Stdout, Write};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use surge_ping::{IcmpPacket, SurgeError};
 use time::format_description::FormatItem;
 use time::{format_description, OffsetDateTime};
 use tokio::{signal, task};
@@ -62,7 +63,7 @@ async fn main() {
         .arg(
             arg!(--ttl <TTL> "Set the ping Time to Live (default=128, max=255)")
                 .required(false)
-                .value_parser(value_parser!(u8).range(1..)),
+                .value_parser(value_parser!(u32).range(1..)),
         )
         .get_matches();
 
@@ -75,7 +76,7 @@ async fn main() {
         .to_owned();
     let delay = matches.get_one::<u64>("delay").unwrap_or(&120).to_owned();
     let num_bytes = matches.get_one::<u8>("num-bytes").unwrap_or(&4).to_owned();
-    let ttl = matches.get_one::<u8>("ttl").unwrap_or(&128).to_owned();
+    let ttl = matches.get_one::<u32>("ttl").unwrap_or(&128).to_owned();
 
     if !output_path.exists() || !output_path.is_dir() {
         eprintln!(
@@ -120,8 +121,14 @@ async fn main() {
             // wait for timer
             interval.tick().await;
             let (time, result) = engine.ping().await;
-            let last_ping_text: StyledContent<String> =
-                generate_ping_text(num_bytes, ttl, &dt_fmt, time, result);
+            let last_ping_text: StyledContent<String> = generate_ping_text(
+                num_bytes,
+                ttl,
+                &dt_fmt,
+                time,
+                result,
+                engine.get_processed_ip(),
+            );
             let last_successful_text: StyledContent<String> =
                 generate_last_success_text(&mut engine, &dt_fmt);
             let last_failed_text: StyledContent<String> =
@@ -173,7 +180,7 @@ fn generate_last_success_text(
         format!(
             "{} ({}ms)",
             last_successful_time.format(&dt_fmt).unwrap(),
-            engine.get_last_successful_latency()
+            engine.get_last_successful_latency().as_millis()
         )
         .green()
     } else {
@@ -185,18 +192,19 @@ fn generate_last_success_text(
 /// failed, and green otherwise.
 fn generate_ping_text(
     num_bytes: u8,
-    ttl: u8,
+    ttl: u32,
     dt_fmt: &Vec<FormatItem>,
     time: OffsetDateTime,
-    result: PingApiOutput,
+    result: Result<(IcmpPacket, Duration), SurgeError>,
+    address: IpAddr,
 ) -> StyledContent<String> {
-    if let Ok(result) = result {
+    if let Ok((_, rtt)) = result {
         format!(
             "[{}] Reply from {}: bytes={} time={}ms TTL={}",
             time.format(&dt_fmt).unwrap(),
-            result.address,
+            address,
             num_bytes,
-            result.rtt,
+            rtt.as_millis(),
             ttl
         )
         .green()
@@ -232,7 +240,7 @@ fn generate_delay_timeout_text(delay: u64, timeout: u64) -> String {
 }
 
 /// Generate stylized text representing the number of bytes and ttl of the current run
-fn generate_bytes_ttl_text(ttl: u8, num_bytes: u8) -> String {
+fn generate_bytes_ttl_text(ttl: u32, num_bytes: u8) -> String {
     format!(
         "{}Num. Bytes:{} {num_bytes}, {}TTL:{} {ttl}\n",
         Attribute::Bold,
