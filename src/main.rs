@@ -17,7 +17,7 @@
  */
 
 use crate::engine::Engine;
-use clap::{arg, value_parser, Command};
+use clap::{arg, value_parser, ArgAction, Command};
 use crossterm::style::{Attribute, StyledContent, Stylize};
 use crossterm::{cursor, terminal, ExecutableCommand};
 use std::io::{stdout, Stdout, Write};
@@ -65,6 +65,11 @@ async fn main() {
                 .required(false)
                 .value_parser(value_parser!(u32).range(1..)),
         )
+        .arg(
+            arg!(-q --quiet "Suppress output to stdout/stderr")
+                .required(false)
+                .action(ArgAction::SetFalse),
+        )
         .get_matches();
 
     // Extract values from parser
@@ -77,6 +82,7 @@ async fn main() {
     let delay = matches.get_one::<u64>("delay").unwrap_or(&120).to_owned();
     let num_bytes = matches.get_one::<u8>("num-bytes").unwrap_or(&4).to_owned();
     let ttl = matches.get_one::<u32>("ttl").unwrap_or(&128).to_owned();
+    let verbose_mode = matches.get_flag("quiet");
 
     if !output_path.exists() || !output_path.is_dir() {
         eprintln!(
@@ -112,7 +118,9 @@ async fn main() {
         )
         .await;
         let dt_fmt = format_description::parse(DT_FMT).unwrap();
-        stdout.execute(cursor::Hide).unwrap();
+        if verbose_mode {
+            stdout.execute(cursor::Hide).unwrap();
+        }
         let target_text = generate_target_text(&addr);
         let path_text = generate_path_text(&canonicalized_output_path);
         let delay_timeout_text = generate_delay_timeout_text(delay, timeout);
@@ -121,42 +129,48 @@ async fn main() {
             // wait for timer
             interval.tick().await;
             let (time, result) = engine.ping().await;
-            let last_ping_text: StyledContent<String> = generate_ping_text(
-                num_bytes,
-                ttl,
-                &dt_fmt,
-                time,
-                result,
-                engine.get_processed_ip(),
-            );
-            let last_successful_text: StyledContent<String> =
-                generate_last_success_text(&mut engine, &dt_fmt);
-            let last_failed_text: StyledContent<String> =
-                generate_last_failed_text(&engine, &dt_fmt);
-            stdout
-                .execute(terminal::Clear(terminal::ClearType::FromCursorDown))
-                .unwrap();
-            display_tui(
-                &stdout,
-                &last_successful_text,
-                &last_failed_text,
-                &last_ping_text,
-                &target_text,
-                &path_text,
-                &delay_timeout_text,
-                &bytes_ttl_text,
-            );
-            stdout.flush().unwrap();
-            stdout.execute(cursor::MoveUp(10)).unwrap();
+            if verbose_mode {
+                let last_ping_text: StyledContent<String> = generate_ping_text(
+                    num_bytes,
+                    ttl,
+                    &dt_fmt,
+                    time,
+                    result,
+                    engine.get_processed_ip(),
+                );
+                let last_successful_text: StyledContent<String> =
+                    generate_last_success_text(&mut engine, &dt_fmt);
+                let last_failed_text: StyledContent<String> =
+                    generate_last_failed_text(&engine, &dt_fmt);
+                stdout
+                    .execute(terminal::Clear(terminal::ClearType::FromCursorDown))
+                    .unwrap();
+                display_tui(
+                    &stdout,
+                    &last_successful_text,
+                    &last_failed_text,
+                    &last_ping_text,
+                    &target_text,
+                    &path_text,
+                    &delay_timeout_text,
+                    &bytes_ttl_text,
+                );
+                stdout.flush().unwrap();
+                stdout.execute(cursor::MoveUp(10)).unwrap();
+            }
         }
     });
     // Below is invoked upon the user pressing Ctrl+C
     signal::ctrl_c().await.expect("event listener failure");
     // Move cursor down to prevent overwriting old TUI
-    let mut exit_stdout = stdout();
-    exit_stdout.execute(cursor::MoveDown(10)).unwrap();
-    println!("{}", "\nExiting".blue().bold());
-    exit_stdout.execute(cursor::Show).unwrap();
+    if verbose_mode {
+        let mut exit_stdout = stdout();
+        exit_stdout.execute(cursor::MoveDown(10)).unwrap();
+        println!("{}", "\nExiting".blue().bold());
+        exit_stdout.execute(cursor::Show).unwrap();
+    } else {
+        println!(); // Move down one line
+    }
     app_task.abort();
 }
 
