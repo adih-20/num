@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = "4.3.19"
+clap = "4.3.24"
 crossterm = { default-features = false, version = "0.26.1" }
 surge-ping = "0.8.0"
 time = { version = "0.3.24", features = ["formatting", "local-offset"], default-features = false }
