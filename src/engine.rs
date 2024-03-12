@@ -24,7 +24,7 @@ use surge_ping::{
 };
 use time::format_description::OwnedFormatItem;
 use time::{format_description, OffsetDateTime};
-use tokio::fs::{File, OpenOptions};
+use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::net;
 
@@ -163,7 +163,7 @@ impl Engine {
             "result_{}.csv",
             self.start_time.format(&self.file_date_fmt).unwrap()
         ));
-        let mut new_csv = OpenOptions::new()
+        let mut new_csv = File::options()
             .create_new(true)
             .write(true)
             .open(&csv_path)
@@ -174,11 +174,7 @@ impl Engine {
             .await
             .expect("Error writing header to CSV");
         new_csv.flush().await.unwrap();
-        OpenOptions::new()
-            .append(true)
-            .open(&csv_path)
-            .await
-            .unwrap()
+        File::options().append(true).open(&csv_path).await.unwrap()
     }
 
     /// Appends log data to a pre-created CSV.

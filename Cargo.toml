@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = "4.3.19"
-crossterm = { default-features = false, version = "0.26.1" }
-surge-ping = "0.8.0"
-time = { version = "0.3.24", features = ["formatting", "local-offset"], default-features = false }
-tokio = { version = "1.29.1", features = ["macros", "signal", "fs", "io-util", "time", "rt-multi-thread", "net"], default-features = false }
+clap = "4.5.2"
+crossterm = { default-features = false, version = "0.27.0" }
+surge-ping = "0.8.1"
+time = { version = "0.3.34", features = ["formatting", "local-offset"], default-features = false }
+tokio = { version = "1.36.0", features = ["macros", "signal", "fs", "io-util", "time", "rt-multi-thread", "net"], default-features = false }
 
 [profile.release]
 opt-level = "z"
